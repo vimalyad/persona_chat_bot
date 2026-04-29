@@ -1,7 +1,7 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import { initDb } from './db/database';
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import { initDb } from "./db/database";
 
 dotenv.config();
 
@@ -11,12 +11,12 @@ const port = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-import chatRouter from './routes/chat';
+import chatRouter from "./routes/chat";
 
-app.use('/api', chatRouter);
+app.use("/api", chatRouter);
 
-app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
 });
 
 async function startServer() {

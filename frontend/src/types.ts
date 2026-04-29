@@ -1,5 +1,5 @@
-export type Role = 'user' | 'assistant';
-export type Persona = 'anshuman' | 'abhimanyu' | 'kshitij';
+export type Role = "user" | "assistant";
+export type Persona = "anshuman" | "abhimanyu" | "kshitij";
 
 export interface ChatMessage {
   id?: number;

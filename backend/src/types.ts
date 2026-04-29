@@ -1,4 +1,4 @@
-export type Role = 'user' | 'assistant';
+export type Role = "user" | "assistant";
 
 export interface ChatMessage {
   id?: number;
@@ -8,4 +8,4 @@ export interface ChatMessage {
   created_at?: Date;
 }
 
-export type Persona = 'anshuman' | 'abhimanyu' | 'kshitij';
+export type Persona = "anshuman" | "abhimanyu" | "kshitij";
