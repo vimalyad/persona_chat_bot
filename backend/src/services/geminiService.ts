@@ -44,34 +44,59 @@ export async function streamChatResponse(
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
+  const TIMEOUT_MS = 10_000;
+
+  // Race the stream init against a 10s timeout
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('TIMEOUT')), TIMEOUT_MS)
+  );
+
+  let response;
+  try {
+    response = await Promise.race([
+      client.models.generateContentStream({
+        model: 'gemini-2.5-flash',
+        contents,
+        config: {
+          systemInstruction: systemPrompt,
+          temperature: 0.7,
+          thinkingConfig: {
+            thinkingBudget: 2048,
+          },
+        }
+      }),
+      timeoutPromise,
+    ]);
+  } catch (err: any) {
+    const errorMsg = err.message === 'TIMEOUT'
+      ? 'The server took too long to respond. Please try again.'
+      : 'Something went wrong while connecting to the AI. Please try again.';
+    res.write(`data: ${JSON.stringify({ error: errorMsg })}\n\n`);
+    res.write(`data: [DONE]\n\n`);
+    res.end();
+    return '';
+  }
+
   let fullText = '';
 
-  const response = await client.models.generateContentStream({
-    model: 'gemini-2.5-flash',
-    contents,
-    config: {
-      systemInstruction: systemPrompt,
-      temperature: 0.7,
-      thinkingConfig: {
-        thinkingBudget: 2048,
-      },
-    }
-  });
+  try {
+    for await (const chunk of response) {
+      const parts = chunk.candidates?.[0]?.content?.parts;
+      if (!parts) continue;
 
-  for await (const chunk of response) {
-    // Access the parts array directly to filter out thought parts
-    const parts = chunk.candidates?.[0]?.content?.parts;
-    if (!parts) continue;
+      for (const part of parts) {
+        if (part.thought) continue;
 
-    for (const part of parts) {
-      // Skip thought parts — these are Gemini's internal reasoning
-      if (part.thought) continue;
-
-      const text = part.text || '';
-      if (text) {
-        fullText += text;
-        res.write(`data: ${JSON.stringify({ text })}\n\n`);
+        const text = part.text || '';
+        if (text) {
+          fullText += text;
+          res.write(`data: ${JSON.stringify({ text })}\n\n`);
+        }
       }
+    }
+  } catch {
+    if (!fullText) {
+      res.write(`data: ${JSON.stringify({ error: 'The response was interrupted. Please try again.' })}\n\n`);
     }
   }
 

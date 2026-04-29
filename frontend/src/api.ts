@@ -61,6 +61,10 @@ export const sendChatMessageStream = async (
           }
           try {
             const parsed = JSON.parse(data);
+            if (parsed.error) {
+              onError(parsed.error);
+              return;
+            }
             if (parsed.text) {
               onChunk(parsed.text);
             }
