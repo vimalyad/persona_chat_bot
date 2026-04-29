@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { ChatMessage, Persona, Session } from './types';
+import type { ChatMessage, Persona, Session } from './types';
 
 // Use the VITE_API_URL env variable or fallback to localhost during local dev
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
