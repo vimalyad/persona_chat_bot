@@ -9,10 +9,10 @@ const SUGGESTIONS: Record<Persona, string[]> = {
   kshitij: ["How do I stay motivated when coding is hard?", "Will AI replace backend engineers?", "What was your favorite memory at IIIT?"],
 };
 
-const PERSONA_META: Record<Persona, { name: string; color: string; initial: string }> = {
-  anshuman: { name: "Anshuman Singh", color: "bg-emerald-500", initial: "A" },
-  abhimanyu: { name: "Abhimanyu Saxena", color: "bg-amber-500", initial: "Ab" },
-  kshitij: { name: "Kshitij Mishra", color: "bg-violet-500", initial: "K" },
+const PERSONA_META: Record<Persona, { name: string; color: string; ring: string; image: string }> = {
+  anshuman: { name: "Anshuman Singh", color: "bg-emerald-500", ring: "ring-emerald-500", image: "/anshuman.png" },
+  abhimanyu: { name: "Abhimanyu Saxena", color: "bg-rose-500", ring: "ring-rose-500", image: "/abhimanyu.png" },
+  kshitij: { name: "Kshitij Mishra", color: "bg-violet-500", ring: "ring-violet-500", image: "/kshitij.png" },
 };
 
 const App: React.FC = () => {
@@ -225,9 +225,7 @@ const App: React.FC = () => {
                     ? 'bg-white/10 border border-white/20 text-white shadow-md'
                     : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
               >
-                <span className={`${m.color} w-10 h-10 lg:w-12 lg:h-12 rounded-full flex items-center justify-center font-bold text-white text-base lg:text-lg shrink-0`}>
-                  {m.initial}
-                </span>
+                <img src={m.image} alt={m.name} className={`w-10 h-10 lg:w-12 lg:h-12 rounded-full object-cover shrink-0 ring-2 ${isActive ? m.ring : 'ring-transparent'}`} />
                 <span className="font-medium text-base lg:text-lg">{m.name}</span>
               </button>
             );
@@ -248,9 +246,7 @@ const App: React.FC = () => {
             >
               <Menu size={22} />
             </button>
-            <span className={`${meta.color} w-11 h-11 lg:w-14 lg:h-14 rounded-full flex items-center justify-center font-bold text-white text-lg lg:text-xl shrink-0`}>
-              {meta.initial}
-            </span>
+            <img src={meta.image} alt={meta.name} className={`w-11 h-11 lg:w-14 lg:h-14 rounded-full object-cover shrink-0 ring-2 ${meta.ring}`} />
             <div>
               <h2 className="font-semibold text-lg md:text-xl lg:text-2xl leading-tight">{meta.name}</h2>
               <span className="text-emerald-400 text-sm lg:text-base flex items-center gap-1.5">
@@ -274,9 +270,7 @@ const App: React.FC = () => {
           {/* Empty State */}
           {messages.length === 0 && !isLoading && (
             <div className="m-auto text-center w-full max-w-2xl px-4">
-              <div className="w-24 h-24 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center mx-auto mb-6">
-                <Bot size={48} />
-              </div>
+              <img src={meta.image} alt={meta.name} className={`w-24 h-24 lg:w-28 lg:h-28 rounded-full object-cover ring-4 ${meta.ring} mx-auto mb-6`} />
               <h3 className="text-2xl md:text-3xl font-semibold mb-3">Start a conversation</h3>
               <p className="text-slate-400 text-base md:text-lg mb-8">Ask {meta.name} anything — try one of these:</p>
               <div className="flex flex-wrap gap-3 justify-center">
@@ -303,11 +297,13 @@ const App: React.FC = () => {
                 <div className={`flex gap-3 w-full ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
                   style={{ maxWidth: '85%' }}
                 >
-                  {/* Avatar */}
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 mt-1
-                    ${msg.role === 'user' ? 'bg-blue-600' : 'bg-slate-700'}`}>
-                    {msg.role === 'user' ? <User size={18} /> : <Bot size={18} />}
-                  </div>
+                  {msg.role === 'user' ? (
+                    <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center shrink-0 mt-1">
+                      <User size={18} />
+                    </div>
+                  ) : (
+                    <img src={meta.image} alt={meta.name} className="w-9 h-9 rounded-full object-cover shrink-0 mt-1" />
+                  )}
                   {/* Bubble */}
                   <div className={`px-5 py-4 rounded-2xl text-base lg:text-lg leading-relaxed whitespace-pre-wrap
                     ${msg.role === 'user'
