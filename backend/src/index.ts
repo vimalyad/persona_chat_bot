@@ -11,6 +11,10 @@ const port = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+import chatRouter from './routes/chat';
+
+app.use('/api', chatRouter);
+
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
