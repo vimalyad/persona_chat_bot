@@ -1,0 +1,13 @@
+# Ignore assignment files and drafts
+Assignment 01 — Persona-Based AI Chatbot.pdf
+abhimanyu.txt
+anshuman.txt
+kshitij.txt
+pdf_text.txt
+
+# Common ignores
+node_modules/
+.env
+.DS_Store
+dist/
+build/
