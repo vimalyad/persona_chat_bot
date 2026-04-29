@@ -14,3 +14,20 @@ export interface Session {
   persona: Persona;
   created_at?: string;
 }
+
+export type UiMessage = ChatMessage & {
+  isError?: boolean;
+  retryText?: string;
+};
+
+export type ModelOption = {
+  id: string;
+  name: string;
+};
+
+export type PersonaMeta = {
+  name: string;
+  color: string;
+  ring: string;
+  image: string;
+};
