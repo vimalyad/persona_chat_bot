@@ -1,22 +1,19 @@
 import { Router } from 'express';
 import { getDb } from '../db/database';
-import { generateChatResponse } from '../services/geminiService';
+import { streamChatResponse } from '../services/geminiService';
 import { ChatMessage, Persona } from '../types';
 import crypto from 'crypto';
 
 const router = Router();
 
-// Helper to generate simple ID
 function generateId() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-// Get the current session and chat history for a persona
 router.get('/sessions/:persona', async (req, res) => {
   const { persona } = req.params;
   const db = await getDb();
   
-  // Find latest session for this persona
   let session = await db.get('SELECT * FROM sessions WHERE persona = ? ORDER BY created_at DESC LIMIT 1', [persona]);
   
   if (!session) {
@@ -30,7 +27,6 @@ router.get('/sessions/:persona', async (req, res) => {
   res.json({ session, messages });
 });
 
-// Reset the conversation for a persona (creates a new session)
 router.post('/sessions/:persona/reset', async (req, res) => {
   const { persona } = req.params;
   const db = await getDb();
@@ -41,7 +37,6 @@ router.post('/sessions/:persona/reset', async (req, res) => {
   res.json({ session: { id: sessionId, persona }, messages: [] });
 });
 
-// Send a chat message
 router.post('/chat', async (req, res) => {
   const { sessionId, persona, message } = req.body;
   if (!sessionId || !persona || !message) {
@@ -51,26 +46,21 @@ router.post('/chat', async (req, res) => {
   const db = await getDb();
   
   try {
-    // 1. Save user message to DB
     await db.run('INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)', [sessionId, 'user', message]);
     
-    // 2. Fetch history for Gemini
     const history = await db.all('SELECT role, content FROM messages WHERE session_id = ? ORDER BY id ASC', [sessionId]);
-    
-    // Since generateChatResponse expects history and the new message separated, 
-    // we slice off the user message we just inserted.
     const messageHistory = history.slice(0, -1) as ChatMessage[];
 
-    // 3. Get LLM response
-    const aiResponse = await generateChatResponse(persona as Persona, messageHistory, message);
+    // Stream the response via SSE — returns the full cleaned text when done
+    const fullResponse = await streamChatResponse(persona as Persona, messageHistory, message, res);
     
-    // 4. Save LLM response to DB
-    await db.run('INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)', [sessionId, 'assistant', aiResponse]);
-    
-    res.json({ response: aiResponse });
+    // Save the complete assistant response to DB after streaming finishes
+    await db.run('INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)', [sessionId, 'assistant', fullResponse]);
   } catch (error: any) {
     console.error('Error generating chat response:', error);
-    res.status(500).json({ error: error.message || 'An error occurred during response generation' });
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message || 'An error occurred during response generation' });
+    }
   }
 });
 

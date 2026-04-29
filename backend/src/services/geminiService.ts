@@ -1,8 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
 import { prompts } from '../prompts';
 import { ChatMessage, Persona } from '../types';
+import { Response } from 'express';
 
-// We initialize it lazily to ensure process.env is populated by dotenv
 let ai: GoogleGenAI | null = null;
 
 function getAiClient() {
@@ -15,38 +15,68 @@ function getAiClient() {
   return ai;
 }
 
-export async function generateChatResponse(persona: Persona, messageHistory: ChatMessage[], userMessage: string): Promise<string> {
-  const client = getAiClient();
-  const systemPrompt = prompts[persona];
-  
-  if (!systemPrompt) {
-    throw new Error(`Persona '${persona}' not found.`);
-  }
-
-  // Map our generic role format ('user'/'assistant') to Gemini's format ('user'/'model')
+function buildContents(messageHistory: ChatMessage[], userMessage: string) {
   const contents = messageHistory.map(msg => ({
     role: msg.role === 'user' ? 'user' : 'model',
     parts: [{ text: msg.content }]
   }));
-  
-  contents.push({
-    role: 'user',
-    parts: [{ text: userMessage }]
-  });
+  contents.push({ role: 'user', parts: [{ text: userMessage }] });
+  return contents;
+}
 
-  const response = await client.models.generateContent({
+export async function streamChatResponse(
+  persona: Persona,
+  messageHistory: ChatMessage[],
+  userMessage: string,
+  res: Response
+): Promise<string> {
+  const client = getAiClient();
+  const systemPrompt = prompts[persona];
+
+  if (!systemPrompt) {
+    throw new Error(`Persona '${persona}' not found.`);
+  }
+
+  const contents = buildContents(messageHistory, userMessage);
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  let fullText = '';
+
+  const response = await client.models.generateContentStream({
     model: 'gemini-2.5-flash',
     contents,
     config: {
       systemInstruction: systemPrompt,
       temperature: 0.7,
+      thinkingConfig: {
+        thinkingBudget: 2048,
+      },
     }
   });
 
-  const rawText = response.text || "";
-  
-  // Strip out the internal reasoning from the final message
-  const cleanText = rawText.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '').trim();
+  for await (const chunk of response) {
+    // Access the parts array directly to filter out thought parts
+    const parts = chunk.candidates?.[0]?.content?.parts;
+    if (!parts) continue;
 
-  return cleanText || "Sorry, I couldn't generate a response.";
+    for (const part of parts) {
+      // Skip thought parts — these are Gemini's internal reasoning
+      if (part.thought) continue;
+
+      const text = part.text || '';
+      if (text) {
+        fullText += text;
+        res.write(`data: ${JSON.stringify({ text })}\n\n`);
+      }
+    }
+  }
+
+  res.write(`data: [DONE]\n\n`);
+  res.end();
+
+  return fullText.trim();
 }

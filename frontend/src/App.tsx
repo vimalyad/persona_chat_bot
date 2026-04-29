@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Send, User, Bot, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Send, User, Bot, RefreshCw, Menu, X } from 'lucide-react';
 import type { Persona, ChatMessage } from './types';
-import { getSession, resetSession, sendChatMessage } from './api';
+import { getSession, resetSession, sendChatMessageStream } from './api';
 
 const SUGGESTIONS: Record<Persona, string[]> = {
   anshuman: ["How do I beat procrastination?", "Is it enough to just be a good coder?", "Why did you start Scaler?"],
@@ -21,12 +21,14 @@ const App: React.FC = () => {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [inputMessage, setInputMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
-  useEffect(() => { scrollToBottom(); }, [messages, isLoading]);
+  useEffect(() => { scrollToBottom(); }, [messages, isLoading, isStreaming]);
 
   useEffect(() => {
     const loadSession = async () => {
@@ -44,21 +46,117 @@ const App: React.FC = () => {
     loadSession();
   }, [activePersona]);
 
-  const handleSend = async (text: string) => {
-    if (!text.trim() || !sessionId) return;
+  // Typewriter animation refs
+  const fullTextRef = useRef('');
+  const displayedLenRef = useRef(0);
+  const animFrameRef = useRef<number | null>(null);
+
+  // Adaptive typewriter - speed adjusts based on how much text is buffered
+  const startTypewriter = useCallback(() => {
+    if (animFrameRef.current) return;
+
+    let lastTime = 0;
+
+    const tick = (timestamp: number) => {
+      const backlog = fullTextRef.current.length - displayedLenRef.current;
+      if (backlog <= 0) {
+        animFrameRef.current = null;
+        return;
+      }
+
+      // Adaptive speed: more backlog = faster reveal
+      // backlog < 10  → slow & natural (25ms per char, 1 char at a time)
+      // backlog 10-50 → medium pace   (12ms per char, 1-2 chars)
+      // backlog > 50  → fast catch-up  (5ms per char, 3+ chars)
+      let delay: number;
+      let charsPerTick: number;
+
+      if (backlog < 10) {
+        delay = 25;
+        charsPerTick = 1;
+      } else if (backlog < 50) {
+        delay = 12;
+        charsPerTick = 2;
+      } else if (backlog < 150) {
+        delay = 5;
+        charsPerTick = 3;
+      } else {
+        delay = 2;
+        charsPerTick = 5;
+      }
+
+      if (timestamp - lastTime >= delay) {
+        lastTime = timestamp;
+
+        const newLen = Math.min(displayedLenRef.current + charsPerTick, fullTextRef.current.length);
+        displayedLenRef.current = newLen;
+        const shown = fullTextRef.current.slice(0, newLen);
+
+        setMessages(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { ...updated[updated.length - 1], content: shown };
+          return updated;
+        });
+      }
+
+      if (displayedLenRef.current < fullTextRef.current.length) {
+        animFrameRef.current = requestAnimationFrame(tick);
+      } else {
+        animFrameRef.current = null;
+      }
+    };
+
+    animFrameRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  const handleSend = useCallback(async (text: string) => {
+    if (!text.trim() || !sessionId || isStreaming) return;
+
     const userMsg: ChatMessage = { role: 'user', content: text };
     setMessages(prev => [...prev, userMsg]);
     setInputMessage("");
-    setIsLoading(true);
-    try {
-      const data = await sendChatMessage(sessionId, activePersona, text);
-      setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
-    } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: "Something went wrong. Please try again." }]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    setIsStreaming(true);
+
+    // Reset typewriter state
+    fullTextRef.current = '';
+    displayedLenRef.current = 0;
+
+    // Add an empty assistant message that we will type into
+    setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+
+    await sendChatMessageStream(
+      sessionId,
+      activePersona,
+      text,
+      (chunk: string) => {
+        // Buffer the chunk and kick off the typewriter
+        fullTextRef.current += chunk;
+        startTypewriter();
+      },
+      () => {
+        // When stream ends, flush remaining characters then mark done
+        const waitForFlush = () => {
+          if (displayedLenRef.current >= fullTextRef.current.length) {
+            setIsStreaming(false);
+          } else {
+            startTypewriter();
+            requestAnimationFrame(waitForFlush);
+          }
+        };
+        waitForFlush();
+      },
+      (error: string) => {
+        if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+        setMessages(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { role: 'assistant', content: error };
+          return updated;
+        });
+        setIsStreaming(false);
+      }
+    );
+  }, [sessionId, activePersona, isStreaming, startTypewriter]);
 
   const handleReset = async () => {
     setIsLoading(true);
@@ -73,37 +171,64 @@ const App: React.FC = () => {
     }
   };
 
+  const handlePersonaSwitch = (p: Persona) => {
+    setActivePersona(p);
+    setSidebarOpen(false);
+  };
+
   const meta = PERSONA_META[activePersona];
 
   return (
-    <div className="flex h-screen w-screen bg-slate-950 text-slate-100 overflow-hidden">
+    <div className="flex h-screen w-screen bg-slate-950 text-slate-100 overflow-hidden font-inter">
+
+      {/* ─── MOBILE OVERLAY ─── */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-20 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
 
       {/* ─── SIDEBAR ─── */}
-      <aside className="w-72 shrink-0 flex flex-col bg-slate-900/70 backdrop-blur border-r border-white/10">
-        <div className="px-6 py-5 border-b border-white/10">
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-            Scaler Mentors
-          </h1>
-          <p className="text-slate-400 text-sm mt-1">Select a persona to chat with</p>
+      <aside className={`
+        fixed lg:relative z-30 lg:z-auto
+        flex flex-col w-72 lg:w-80 xl:w-96 h-full shrink-0
+        bg-slate-900 border-r border-white/10
+        transition-transform duration-300 ease-in-out
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+      `}>
+        <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
+          <div>
+            <h1 className="text-xl lg:text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+              Scaler Mentors
+            </h1>
+            <p className="text-slate-400 text-sm lg:text-base mt-0.5">Chat with your mentors</p>
+          </div>
+          <button
+            className="lg:hidden text-slate-400 hover:text-white"
+            onClick={() => setSidebarOpen(false)}
+          >
+            <X size={20} />
+          </button>
         </div>
 
-        <nav className="flex flex-col gap-2 p-4">
+        <nav className="flex flex-col gap-2 p-4 lg:p-5 flex-1">
           {(Object.keys(PERSONA_META) as Persona[]).map((p) => {
             const m = PERSONA_META[p];
             const isActive = activePersona === p;
             return (
               <button
                 key={p}
-                onClick={() => setActivePersona(p)}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all duration-200 
+                onClick={() => handlePersonaSwitch(p)}
+                className={`flex items-center gap-3 lg:gap-4 px-4 lg:px-5 py-3.5 lg:py-4 rounded-xl text-left transition-all duration-200 w-full
                   ${isActive
                     ? 'bg-white/10 border border-white/20 text-white shadow-md'
                     : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'}`}
               >
-                <span className={`${m.color} w-9 h-9 rounded-full flex items-center justify-center font-bold text-white text-sm shrink-0`}>
+                <span className={`${m.color} w-10 h-10 lg:w-12 lg:h-12 rounded-full flex items-center justify-center font-bold text-white text-base lg:text-lg shrink-0`}>
                   {m.initial}
                 </span>
-                <span className="font-medium">{m.name}</span>
+                <span className="font-medium text-base lg:text-lg">{m.name}</span>
               </button>
             );
           })}
@@ -111,48 +236,55 @@ const App: React.FC = () => {
       </aside>
 
       {/* ─── MAIN CHAT ─── */}
-      <main className="flex flex-col flex-1 overflow-hidden">
+      <main className="flex flex-col flex-1 overflow-hidden min-w-0">
 
         {/* Chat Header */}
-        <header className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-950/80 backdrop-blur z-10">
+        <header className="flex items-center justify-between px-4 md:px-6 lg:px-8 py-4 lg:py-5 border-b border-white/10 bg-slate-950/90 backdrop-blur z-10 shrink-0">
           <div className="flex items-center gap-3">
-            <span className={`${meta.color} w-11 h-11 rounded-full flex items-center justify-center font-bold text-white`}>
+            {/* Mobile menu toggle */}
+            <button
+              className="lg:hidden text-slate-400 hover:text-white mr-1"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Menu size={22} />
+            </button>
+            <span className={`${meta.color} w-11 h-11 lg:w-14 lg:h-14 rounded-full flex items-center justify-center font-bold text-white text-lg lg:text-xl shrink-0`}>
               {meta.initial}
             </span>
             <div>
-              <h2 className="font-semibold text-lg">{meta.name}</h2>
-              <span className="text-emerald-400 text-xs flex items-center gap-1">
-                <span className="inline-block w-1.5 h-1.5 bg-emerald-400 rounded-full" />
+              <h2 className="font-semibold text-lg md:text-xl lg:text-2xl leading-tight">{meta.name}</h2>
+              <span className="text-emerald-400 text-sm lg:text-base flex items-center gap-1.5">
+                <span className="inline-block w-2 h-2 bg-emerald-400 rounded-full" />
                 Online
               </span>
             </div>
           </div>
           <button
             onClick={handleReset}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-slate-400 bg-white/5 border border-white/10 hover:bg-white/10 hover:text-white transition-all"
+            className="flex items-center gap-2 px-3 md:px-4 lg:px-5 py-2 lg:py-2.5 rounded-lg text-sm lg:text-base text-slate-400 bg-white/5 border border-white/10 hover:bg-white/10 hover:text-white transition-all"
           >
             <RefreshCw size={15} />
-            Reset Chat
+            <span className="hidden sm:inline">Reset Chat</span>
           </button>
         </header>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6 flex flex-col">
+        {/* Messages Area */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 flex flex-col">
 
           {/* Empty State */}
           {messages.length === 0 && !isLoading && (
-            <div className="m-auto text-center max-w-xl animate-fadeIn">
-              <div className="w-20 h-20 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center mx-auto mb-6">
-                <Bot size={40} />
+            <div className="m-auto text-center w-full max-w-2xl px-4">
+              <div className="w-24 h-24 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center mx-auto mb-6">
+                <Bot size={48} />
               </div>
-              <h3 className="text-2xl font-semibold mb-2">Start a conversation</h3>
-              <p className="text-slate-400 mb-8">Ask {meta.name} anything — try a suggestion below.</p>
+              <h3 className="text-2xl md:text-3xl font-semibold mb-3">Start a conversation</h3>
+              <p className="text-slate-400 text-base md:text-lg mb-8">Ask {meta.name} anything — try one of these:</p>
               <div className="flex flex-wrap gap-3 justify-center">
                 {SUGGESTIONS[activePersona].map((s, i) => (
                   <button
                     key={i}
                     onClick={() => handleSend(s)}
-                    className="px-5 py-3 rounded-full bg-white/5 border border-white/10 text-sm hover:bg-blue-600 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-500/20 hover:-translate-y-0.5 transition-all duration-200"
+                    className="px-5 py-3 rounded-full bg-white/5 border border-white/10 text-sm md:text-base hover:bg-blue-600 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-500/20 hover:-translate-y-0.5 transition-all duration-200"
                   >
                     {s}
                   </button>
@@ -161,64 +293,61 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* Message List */}
-          <div className="flex flex-col gap-6 max-w-3xl w-full mx-auto">
+          {/* Message List — full width, no max-w constraint */}
+          <div className="flex flex-col gap-5 w-full">
             {messages.map((msg, idx) => (
-              <div key={idx} className={`flex animate-slideUp ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`flex gap-3 max-w-[80%] ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1
+              <div
+                key={idx}
+                className={`flex w-full animate-slideUp ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div className={`flex gap-3 w-full ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+                  style={{ maxWidth: '85%' }}
+                >
+                  {/* Avatar */}
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 mt-1
                     ${msg.role === 'user' ? 'bg-blue-600' : 'bg-slate-700'}`}>
-                    {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
+                    {msg.role === 'user' ? <User size={18} /> : <Bot size={18} />}
                   </div>
-                  <div className={`px-5 py-3.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap
+                  {/* Bubble */}
+                  <div className={`px-5 py-4 rounded-2xl text-base lg:text-lg leading-relaxed whitespace-pre-wrap
                     ${msg.role === 'user'
-                      ? 'bg-blue-600 rounded-tr-sm shadow-lg shadow-blue-500/20'
-                      : 'bg-slate-800 border border-white/10 rounded-tl-sm'}`}>
+                      ? 'bg-blue-600 rounded-tr-sm shadow-lg shadow-blue-500/20 text-white'
+                      : 'bg-slate-800 border border-white/10 rounded-tl-sm text-slate-100'}`}
+                  >
                     {msg.content}
                   </div>
                 </div>
               </div>
             ))}
 
-            {/* Typing Indicator */}
-            {isLoading && (
-              <div className="flex justify-start animate-slideUp">
-                <div className="flex gap-3 max-w-[80%]">
-                  <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center shrink-0 mt-1">
-                    <Bot size={16} />
-                  </div>
-                  <div className="bg-slate-800 border border-white/10 rounded-2xl rounded-tl-sm px-5 py-4 flex items-center gap-1.5">
-                    <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce3 delay-100" />
-                    <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce3 delay-200" />
-                    <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce3" />
-                  </div>
-                </div>
-              </div>
+            {/* Streaming cursor blink on the last message */}
+            {isStreaming && messages.length > 0 && messages[messages.length - 1].role === 'assistant' && (
+              <span className="inline-block w-2 h-5 bg-blue-400 animate-pulse ml-1" />
             )}
             <div ref={messagesEndRef} />
           </div>
         </div>
 
-        {/* Input */}
-        <div className="px-6 py-4 border-t border-white/10 bg-slate-900">
+        {/* Input Area — full width, no max-w constraint */}
+        <div className="px-4 md:px-6 lg:px-8 py-4 lg:py-5 border-t border-white/10 bg-slate-900 shrink-0">
           <form
             onSubmit={(e) => { e.preventDefault(); handleSend(inputMessage); }}
-            className="flex items-center gap-3 max-w-3xl mx-auto bg-slate-800/60 border border-white/10 rounded-2xl px-2 py-2 focus-within:border-blue-500 transition-colors"
+            className="flex items-center gap-3 w-full bg-slate-800/60 border border-white/10 rounded-2xl px-3 py-2 lg:py-3 focus-within:border-blue-500 transition-colors"
           >
             <input
               type="text"
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               placeholder={`Ask ${meta.name} something...`}
-              disabled={isLoading || !sessionId}
-              className="flex-1 bg-transparent outline-none px-4 py-2 text-sm text-slate-100 placeholder:text-slate-500 disabled:opacity-50"
+              disabled={isLoading || isStreaming || !sessionId}
+              className="flex-1 bg-transparent outline-none px-4 py-2.5 lg:py-3 text-base lg:text-lg text-slate-100 placeholder:text-slate-500 disabled:opacity-50 min-w-0"
             />
             <button
               type="submit"
-              disabled={!inputMessage.trim() || isLoading || !sessionId}
-              className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center hover:bg-blue-500 hover:scale-105 transition-all disabled:bg-slate-700 disabled:text-slate-500 disabled:scale-100 disabled:cursor-not-allowed"
+              disabled={!inputMessage.trim() || isLoading || isStreaming || !sessionId}
+              className="w-11 h-11 lg:w-12 lg:h-12 rounded-xl bg-blue-600 text-white flex items-center justify-center hover:bg-blue-500 hover:scale-105 transition-all disabled:bg-slate-700 disabled:text-slate-500 disabled:scale-100 disabled:cursor-not-allowed shrink-0"
             >
-              <Send size={17} />
+              <Send size={18} />
             </button>
           </form>
         </div>
