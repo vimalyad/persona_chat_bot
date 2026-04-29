@@ -8,6 +8,8 @@ pdf_text.txt
 # Common ignores
 node_modules/
 .env
+**/.env
 .DS_Store
 dist/
 build/
+*.sqlite
