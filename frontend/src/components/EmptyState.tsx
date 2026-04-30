@@ -19,7 +19,7 @@ export function EmptyState({ activePersona, meta, onSend }: EmptyStateProps) {
         Start a conversation
       </h3>
       <p className="text-slate-400 text-base md:text-lg mb-8">
-        Ask {meta.name} anything — try one of these:
+        Ask {meta.name} anything - try one of these:
       </p>
       <div className="flex flex-wrap gap-3 justify-center">
         {SUGGESTIONS[activePersona].map((suggestion) => (
@@ -35,4 +35,3 @@ export function EmptyState({ activePersona, meta, onSend }: EmptyStateProps) {
     </div>
   );
 }
-

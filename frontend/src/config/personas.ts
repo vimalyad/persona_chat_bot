@@ -41,6 +41,5 @@ export const PERSONA_META: Record<Persona, PersonaMeta> = {
 
 export const FALLBACK_MODEL: ModelOption = {
   id: "groq:allam-2-7b",
-  name: "Groq · allam-2-7b",
+  name: "Groq - allam-2-7b",
 };
-
