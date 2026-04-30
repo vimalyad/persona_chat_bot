@@ -1,4 +1,5 @@
 const BLOCKED_MODEL_PATTERNS = [
+  "allam-2-7b",
   "gemma-3-1b-it",
   "gemma-3-12b-it",
   "gemma-3-27b-it",
